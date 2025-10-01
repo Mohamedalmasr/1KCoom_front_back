@@ -1,8 +1,10 @@
 import { ConflictException, Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { DatabaseService } from '../database/database.service';
+import { Repository } from 'typeorm';
 import { MailService } from '../mail/mail.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UserEntity } from './entities/user.entity';
 
 export interface User {
   id: number;
@@ -15,12 +17,11 @@ export interface User {
   passwordCodeDate?: Date;
 }
 
-const USERS_TABLE = 'tc_users';
-
 @Injectable()
 export class UsersService {
   constructor(
-    private readonly database: DatabaseService,
+    @InjectRepository(UserEntity)
+    private readonly usersRepository: Repository<UserEntity>,
     private readonly mailService: MailService,
   ) {}
 
@@ -37,39 +38,18 @@ export class UsersService {
     const verificationCode = this.generateVerificationCode();
     const codeTimestamp = new Date();
 
-    const query = `
-      INSERT INTO ${USERS_TABLE} (
-        "Email",
-        "Password",
-        "RecSts",
-        "FrstNme",
-        "LastNme",
-        "PasswordCode",
-        "PasswordCodeDate"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING
-        "UsersAID" AS "id",
-        "Email" AS "email",
-        "Password" AS "passwordHash",
-        "RecSts" AS "recSts",
-        "FrstNme" AS "firstName",
-        "LastNme" AS "lastName",
-        "PasswordCode" AS "passwordCode",
-        "PasswordCodeDate" AS "passwordCodeDate";
-    `;
-
-    const result = await this.database.query<UserRecord>(query, [
+    const userEntity = this.usersRepository.create({
       email,
       passwordHash,
       recSts,
-      createUserDto.firstName ?? null,
-      createUserDto.lastName ?? null,
-      verificationCode,
-      codeTimestamp,
-    ]);
+      firstName: createUserDto.firstName ?? null,
+      lastName: createUserDto.lastName ?? null,
+      passwordCode: verificationCode,
+      passwordCodeDate: codeTimestamp,
+    });
 
-    const row = result.rows[0];
-    const user = this.mapRecordToUser(row);
+    const savedUser = await this.usersRepository.save(userEntity);
+    const user = this.mapEntityToUser(savedUser);
 
     await this.mailService.sendVerificationEmail(user.email, verificationCode);
 
@@ -79,24 +59,12 @@ export class UsersService {
   async findByEmail(email: string): Promise<User | undefined> {
     const normalizedEmail = this.normalizeEmail(email);
 
-    const query = `
-      SELECT
-        "UsersAID" AS "id",
-        "Email" AS "email",
-        "Password" AS "passwordHash",
-        "RecSts" AS "recSts",
-        "FrstNme" AS "firstName",
-        "LastNme" AS "lastName",
-        "PasswordCode" AS "passwordCode",
-        "PasswordCodeDate" AS "passwordCodeDate"
-      FROM ${USERS_TABLE}
-      WHERE LOWER("Email") = $1
-      LIMIT 1;
-    `;
+    const entity = await this.usersRepository
+      .createQueryBuilder('user')
+      .where('LOWER(user.email) = :email', { email: normalizedEmail })
+      .getOne();
 
-    const result = await this.database.query<UserRecord>(query, [normalizedEmail]);
-    const row = result.rows[0];
-    return row ? this.mapRecordToUser(row) : undefined;
+    return entity ? this.mapEntityToUser(entity) : undefined;
   }
 
   async validatePassword(user: User, plainPassword: string): Promise<boolean> {
@@ -111,29 +79,16 @@ export class UsersService {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
-  private mapRecordToUser(record: UserRecord): User {
+  private mapEntityToUser(entity: UserEntity): User {
     return {
-      id: record.id,
-      email: record.email,
-      passwordHash: record.passwordHash,
-      recSts: record.recSts ?? 1,
-      firstName: record.firstName ?? undefined,
-      lastName: record.lastName ?? undefined,
-      passwordCode: record.passwordCode ?? undefined,
-      passwordCodeDate: record.passwordCodeDate
-        ? new Date(record.passwordCodeDate)
-        : undefined,
+      id: entity.id,
+      email: entity.email,
+      passwordHash: entity.passwordHash,
+      recSts: entity.recSts ?? 1,
+      firstName: entity.firstName ?? undefined,
+      lastName: entity.lastName ?? undefined,
+      passwordCode: entity.passwordCode ?? undefined,
+      passwordCodeDate: entity.passwordCodeDate ?? undefined,
     };
   }
 }
-
-type UserRecord = {
-  id: number;
-  email: string;
-  passwordHash: string;
-  recSts: number | null;
-  firstName: string | null;
-  lastName: string | null;
-  passwordCode: string | null;
-  passwordCodeDate: string | Date | null;
-};
