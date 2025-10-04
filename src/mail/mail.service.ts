@@ -1,33 +1,67 @@
 // src/mail/mail.service.ts
-import { Injectable, InternalServerErrorException, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import nodemailer, { Transporter } from 'nodemailer';
 
 @Injectable()
 export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
-  private readonly transporter: Transporter;
 
-  // للاطلاع في اللوجز
-  private readonly smtpHost: string;
+  // نخليه قابل يكون null لو الميل متعطّل أو الإعدادات ناقصة
+  private transporter: Transporter | null = null;
+
+  // لوجز مفيدة
+  private readonly enabled: boolean;
+  private readonly smtpHost?: string;
   private readonly smtpPort: number;
   private readonly smtpSecure: boolean;
   private readonly defaultFrom: string;
 
   constructor(private readonly configService: ConfigService) {
+    // MAIL_ENABLED للتحكم السريع (افتراضي: مفعّل)
+    this.enabled = this.parseBoolean(
+      this.configService.get<string>('MAIL_ENABLED'),
+      true,
+    );
+
     const host = this.configService.get<string>('MAIL_HOST');
-    const port = this.parseNumber(this.configService.get<string>('MAIL_PORT'), 587);
-    const secure = this.parseBoolean(this.configService.get<string>('MAIL_SECURE'), port === 465);
+    const port = this.parseNumber(
+      this.configService.get<string>('MAIL_PORT'),
+      587,
+    );
+    const secure = this.parseBoolean(
+      this.configService.get<string>('MAIL_SECURE'),
+      port === 465,
+    );
     const user = this.configService.get<string>('MAIL_USER');
     const pass = this.configService.get<string>('MAIL_PASSWORD');
-    const from = this.configService.get<string>('MAIL_FROM') ?? '1KComm <no-reply@oneklient.com>';
-
-    if (!host) throw new Error('MAIL_HOST environment variable is required for email sending');
+    const from =
+      this.configService.get<string>('MAIL_FROM') ??
+      '1KComm <no-reply@oneklient.com>';
 
     this.smtpHost = host;
     this.smtpPort = port;
     this.smtpSecure = secure;
     this.defaultFrom = from;
+
+    // لو الميل متعطّل صراحةً، ما نجهّزش Transporter
+    if (!this.enabled) {
+      this.logger.warn('Mail is disabled by MAIL_ENABLED=false');
+      return;
+    }
+
+    // لو مفيش HOST ما نرميش Error—نخليه Disabled ونطبع تحذير
+    if (!host) {
+      this.logger.warn(
+        'MAIL_HOST is missing; mail will be disabled for this run.',
+      );
+      return;
+    }
 
     this.transporter = nodemailer.createTransport({
       host,
@@ -36,13 +70,20 @@ export class MailService implements OnModuleInit {
       auth: user && pass ? { user, pass } : undefined,
       // تحسينات اتصال
       pool: true,
-      requireTLS: !secure,                 // مع 587 نضمن STARTTLS
-      tls: { minVersion: 'TLSv1.2' },      // تأمين أعلى
-      // socketTimeout: 20000,             // (اختياري) مهلة 20 ثانية
+      requireTLS: !secure, // مع 587 نضمن STARTTLS
+      tls: { minVersion: 'TLSv1.2' }, // تأمين أعلى
+      // socketTimeout: 20000, // (اختياري) مهلة 20 ثانية
     });
   }
 
   async onModuleInit() {
+    if (!this.transporter) {
+      this.logger.log(
+        'Mail transporter not initialized (disabled or missing config).',
+      );
+      return;
+    }
+
     try {
       await this.transporter.verify();
       this.logger.log(
@@ -57,7 +98,18 @@ export class MailService implements OnModuleInit {
     }
   }
 
-  async sendVerificationEmail(recipient: string, code: string): Promise<void> {
+  async sendVerificationEmail(
+    recipient: string,
+    code: string,
+  ): Promise<void> {
+    // في التطوير أو لو ناقص Config، نطبع Log ونكمل
+    if (!this.transporter) {
+      this.logger.log(
+        `[DEV] Would send verification email to ${recipient} with code: ${code}`,
+      );
+      return;
+    }
+
     const message = {
       from: this.defaultFrom,
       to: recipient,
@@ -75,11 +127,15 @@ export class MailService implements OnModuleInit {
 
     try {
       const info = await this.transporter.sendMail(message);
-      this.logger.log(`Verification email sent to ${recipient}. messageId=${info.messageId}`);
+      this.logger.log(
+        `Verification email sent to ${recipient}. messageId=${info.messageId}`,
+      );
     } catch (error) {
       const err = error as Error;
       this.logger.error('Failed to send verification email', err.stack);
-      throw new InternalServerErrorException('Unable to send verification email');
+      throw new InternalServerErrorException(
+        'Unable to send verification email',
+      );
     }
   }
 
