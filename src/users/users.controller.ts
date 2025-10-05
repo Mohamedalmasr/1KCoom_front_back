@@ -1,5 +1,17 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
+import { ListUsersDto } from './dto/list-users.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
 @Controller('users')
@@ -7,17 +19,76 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
-  async create(@Body() createUserDto: CreateUserDto) {
-    const user = await this.usersService.create(createUserDto);
+  async create(@Body() dto: CreateUserDto) {
+    const u = await this.usersService.create(dto);
+    return {
+      id: u.id,
+      email: u.email,
+      recSts: u.recSts,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      passwordCode: u.passwordCode,
+      passwordCodeDate: u.passwordCodeDate?.toISOString(),
+    };
+  }
+
+  @Get()
+  async findAll(@Query() q: ListUsersDto) {
+    const { items, page, limit, total } = await this.usersService.findAll({
+      page: q.page ?? 1,
+      limit: q.limit ?? 20,
+      includeInactive:
+        q.includeInactive === true || q.includeInactive === 'true',
+      search: q.search ?? q.q, // ندعم search أو q
+      sort: q.sort,            // الآن مدعوم في الـ DTO
+    });
 
     return {
-      id: user.id,
-      email: user.email,
-      recSts: user.recSts,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      passwordCode: user.passwordCode,
-      passwordCodeDate: user.passwordCodeDate?.toISOString(),
+      page,
+      limit,
+      total,
+      items: items.map((u) => ({
+        id: u.id,
+        email: u.email,
+        recSts: u.recSts,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        passwordCodeDate: u.passwordCodeDate?.toISOString(),
+      })),
     };
+  }
+
+  @Get(':id')
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const u = await this.usersService.findOneById(id);
+    return {
+      id: u.id,
+      email: u.email,
+      recSts: u.recSts,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      passwordCodeDate: u.passwordCodeDate?.toISOString(),
+    };
+  }
+
+  @Patch(':id')
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateUserDto,
+  ) {
+    const u = await this.usersService.update(id, dto);
+    return {
+      id: u.id,
+      email: u.email,
+      recSts: u.recSts,
+      firstName: u.firstName,
+      lastName: u.lastName,
+      passwordCodeDate: u.passwordCodeDate?.toISOString(),
+    };
+  }
+
+  @Delete(':id')
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.remove(id); // { success: true, recSts: 0 }
   }
 }

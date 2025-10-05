@@ -1,9 +1,13 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
-import { MailService } from '../mail/mail.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 import { UserEntity } from './entities/user.entity';
 
 export interface User {
@@ -17,53 +21,139 @@ export interface User {
   passwordCodeDate?: Date;
 }
 
+type FindAllOpts = {
+  page?: number;
+  limit?: number;
+  includeInactive?: boolean;
+  search?: string;
+  sort?: string; // e.g. "id:asc"
+};
+
 @Injectable()
 export class UsersService {
   constructor(
     @InjectRepository(UserEntity)
     private readonly usersRepository: Repository<UserEntity>,
-    private readonly mailService: MailService,
   ) {}
 
-  async create(createUserDto: CreateUserDto): Promise<User> {
-    const email = this.normalizeEmail(createUserDto.email);
-    const existingUser = await this.findByEmail(email);
+  // ============ CREATE ============
+  async create(dto: CreateUserDto): Promise<User> {
+    const email = this.normalizeEmail(dto.email);
+    const exists = await this.findByEmail(email);
+    if (exists) throw new ConflictException('Email already exists');
 
-    if (existingUser) {
-      throw new ConflictException('Email already exists');
-    }
+    const passwordHash = await bcrypt.hash(dto.password, 10);
 
-    const passwordHash = await bcrypt.hash(createUserDto.password, 10);
-    const recSts = 1;
-    const verificationCode = this.generateVerificationCode();
-    const codeTimestamp = new Date();
-
-    const userEntity = this.usersRepository.create({
+    const entity = this.usersRepository.create({
       email,
       passwordHash,
-      recSts,
-      firstName: createUserDto.firstName ?? null,
-      lastName: createUserDto.lastName ?? null,
-      passwordCode: verificationCode,
-      passwordCodeDate: codeTimestamp,
+      firstName: dto.firstName ?? null,
+      lastName: dto.lastName ?? null,
+      // recSts default 1 from entity
+      // no passwordCode/passwordCodeDate since email verification disabled
     });
 
-    const savedUser = await this.usersRepository.save(userEntity);
-    const user = this.mapEntityToUser(savedUser);
-
-    await this.mailService.sendVerificationEmail(user.email, verificationCode);
-
-    return user;
+    const saved = await this.usersRepository.save(entity);
+    return this.mapEntityToUser(saved);
   }
 
+  // ============ LIST ============
+  async findAll(opts: FindAllOpts = {}) {
+    const page = Math.max(1, opts.page ?? 1);
+    const limit = Math.min(100, Math.max(1, opts.limit ?? 20));
+
+    const qb = this.usersRepository.createQueryBuilder('u');
+
+    if (!opts.includeInactive) {
+      qb.andWhere('u.recSts = :recSts', { recSts: 1 });
+    }
+
+    if (opts.search?.trim()) {
+      const s = `%${opts.search.trim().toLowerCase()}%`;
+      qb.andWhere(
+        '(LOWER(u.email) LIKE :s OR LOWER(u.firstName) LIKE :s OR LOWER(u.lastName) LIKE :s)',
+        { s },
+      );
+    }
+
+    const sort = this.normalizeSort(opts.sort);
+    qb.orderBy(sort.column, sort.direction).skip((page - 1) * limit).take(limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+    return {
+      items: rows.map((e) => this.mapEntityToUser(e)),
+      page,
+      limit,
+      total,
+    };
+  }
+
+  // ============ ONE ============
+  async findOneById(id: number, includeInactive = false): Promise<User> {
+    const where: any = { id };
+    if (!includeInactive) where.recSts = 1;
+
+    const entity = await this.usersRepository.findOne({ where });
+    if (!entity) throw new NotFoundException('User not found');
+
+    return this.mapEntityToUser(entity);
+  }
+
+  // ============ UPDATE ============
+  async update(id: number, dto: UpdateUserDto): Promise<User> {
+    const entity = await this.usersRepository.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException('User not found');
+
+    if (dto.email) {
+      const newEmail = this.normalizeEmail(dto.email);
+      if (newEmail !== entity.email) {
+        const dup = await this.usersRepository
+          .createQueryBuilder('x')
+          .where('LOWER(x.email) = :email', { email: newEmail })
+          .andWhere('x.id != :id', { id })
+          .getOne();
+        if (dup) throw new ConflictException('Email already exists');
+        entity.email = newEmail;
+      }
+    }
+
+    if (dto.password) {
+      entity.passwordHash = await bcrypt.hash(dto.password, 10);
+    }
+
+    if (typeof dto.firstName === 'string') {
+      entity.firstName = dto.firstName || null;
+    }
+    if (typeof dto.lastName === 'string') {
+      entity.lastName = dto.lastName || null;
+    }
+
+    if (typeof dto.recSts === 'number') {
+      entity.recSts = dto.recSts;
+    }
+
+    const saved = await this.usersRepository.save(entity);
+    return this.mapEntityToUser(saved);
+  }
+
+  // ============ SOFT DELETE ============
+  async remove(id: number): Promise<{ success: boolean; recSts: number }> {
+    const entity = await this.usersRepository.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException('User not found');
+
+    entity.recSts = 0;
+    await this.usersRepository.save(entity);
+
+    return { success: true, recSts: entity.recSts };
+  }
+
+  // ============ Helpers ============
   async findByEmail(email: string): Promise<User | undefined> {
     const normalizedEmail = this.normalizeEmail(email);
-
     const entity = await this.usersRepository
       .createQueryBuilder('user')
       .where('LOWER(user.email) = :email', { email: normalizedEmail })
       .getOne();
-
     return entity ? this.mapEntityToUser(entity) : undefined;
   }
 
@@ -73,10 +163,6 @@ export class UsersService {
 
   private normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
-  }
-
-  private generateVerificationCode(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
   private mapEntityToUser(entity: UserEntity): User {
@@ -90,5 +176,22 @@ export class UsersService {
       passwordCode: entity.passwordCode ?? undefined,
       passwordCodeDate: entity.passwordCodeDate ?? undefined,
     };
+  }
+
+  private normalizeSort(sort?: string): { column: string; direction: 'ASC' | 'DESC' } {
+    const allowed: Record<string, string> = {
+      id: 'u.id',
+      email: 'u.email',
+      firstName: 'u.firstName',
+      lastName: 'u.lastName',
+      recSts: 'u.recSts',
+    };
+    if (!sort || typeof sort !== 'string') {
+      return { column: 'u.id', direction: 'DESC' };
+    }
+    const [rawCol, rawDir] = sort.split(':').map((s) => s.trim());
+    const col = allowed[rawCol] ?? 'u.id';
+    const dir = (rawDir || 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+    return { column: col, direction: dir };
   }
 }

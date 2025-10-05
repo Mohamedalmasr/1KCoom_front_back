@@ -20,12 +20,7 @@ export class UserEntity {
   @Column({ name: 'LastNme', type: 'varchar', length: 255, nullable: true })
   lastName?: string | null;
 
-  @Column({
-    name: 'PasswordCode',
-    type: 'varchar',
-    length: 255,
-    nullable: true,
-  })
+  @Column({ name: 'PasswordCode', type: 'varchar', length: 255, nullable: true })
   passwordCode?: string | null;
 
   @Column({ name: 'PasswordCodeDate', type: 'timestamp', nullable: true })
