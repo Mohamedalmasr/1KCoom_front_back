@@ -194,4 +194,55 @@ export class UsersService {
     const dir = (rawDir || 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
     return { column: col, direction: dir };
   }
+
+  // ============ NEW: Assign Team friendly list ============
+  /**
+   * قائمة خفيفة لاختيار أعضاء الفريق في الويزارد.
+   * Params: search, onlyActive (true), limit (20), offset (0)
+   * Return: { items: [{id,email,firstName,lastName,initials}], total }
+   */
+  async listForAssign(paramsIn?: {
+    search?: string;
+    onlyActive?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ items: Array<User & { initials: string }>; total: number }> {
+    const search = paramsIn?.search?.trim() ?? '';
+    const onlyActive = paramsIn?.onlyActive !== false; // default true
+    const limit = Math.min(100, Math.max(1, Number(paramsIn?.limit ?? 20)));
+    const offset = Math.max(0, Number(paramsIn?.offset ?? 0));
+
+    const qb = this.usersRepository.createQueryBuilder('u')
+      .select(['u.id', 'u.email', 'u.firstName', 'u.lastName', 'u.passwordHash', 'u.recSts']);
+
+    if (onlyActive) {
+      qb.andWhere('u.recSts = :recSts', { recSts: 1 });
+    }
+
+    if (search) {
+      const s = `%${search.toLowerCase()}%`;
+      qb.andWhere(
+        '(LOWER(u.email) LIKE :s OR LOWER(u.firstName) LIKE :s OR LOWER(u.lastName) LIKE :s)',
+        { s },
+      );
+    }
+
+    qb.orderBy('u.id', 'DESC').skip(offset).take(limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+
+    const items = rows.map((e) => {
+      const u = this.mapEntityToUser(e);
+      return { ...u, initials: this.getInitials(u.firstName, u.lastName) };
+    });
+
+    return { items, total };
+  }
+
+  // helper لعمل الـ initials (AJ, MG, ...)
+  private getInitials(first?: string, last?: string): string {
+    const a = (first || '').trim();
+    const b = (last || '').trim();
+    return `${a.slice(0, 1)}${b.slice(0, 1)}`.toUpperCase();
+  }
 }

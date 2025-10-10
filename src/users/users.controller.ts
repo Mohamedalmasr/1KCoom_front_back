@@ -91,4 +91,40 @@ export class UsersController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.remove(id); // { success: true, recSts: 0 }
   }
+
+  // ============ NEW: قائمة خفيفة لـ Assign Team ============
+  // GET /users/assign?search=&onlyActive=1&limit=20&offset=0
+  @Get('assign')
+  async listForAssign(
+    @Query('search') search = '',
+    @Query('onlyActive') onlyActive: string | number | boolean = '1',
+    @Query('limit') limit: string | number = '20',
+    @Query('offset') offset: string | number = '0',
+  ) {
+    const { items, total } = await this.usersService.listForAssign({
+      search,
+      onlyActive: !(
+        onlyActive === '0' ||
+        onlyActive === 0 ||
+        onlyActive === 'false' ||
+        onlyActive === false
+      ),
+      limit: Number(limit),
+      offset: Number(offset),
+    });
+
+    return {
+      total,
+      limit: Number(limit),
+      offset: Number(offset),
+      items: items.map((u: any) => ({
+        id: u.id,
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        recSts: u.recSts,
+        initials: u.initials, // لاستخدامها في الـAvatar زي الفرونت
+      })),
+    };
+  }
 }

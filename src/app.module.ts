@@ -7,6 +7,8 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { BlogModule } from './blog/blog.module';
 import { ContactModule } from './contact/contact.module';
+import { ProjectsModule } from './projects/projects.module';
+
 
 @Module({
   imports: [
@@ -53,6 +55,8 @@ import { ContactModule } from './contact/contact.module';
     AuthModule,
     BlogModule,
     ContactModule,
+    ProjectsModule,
+   
   ],
   controllers: [AppController],
   providers: [AppService],
