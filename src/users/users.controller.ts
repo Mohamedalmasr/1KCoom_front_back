@@ -34,18 +34,26 @@ export class UsersController {
 
   @Get()
   async findAll(@Query() q: ListUsersDto) {
-    const { items, page, limit, total } = await this.usersService.findAll({
-      page: q.page ?? 1,
-      limit: q.limit ?? 20,
-      includeInactive:
-        q.includeInactive === true || q.includeInactive === 'true',
-      search: q.search ?? q.q, // ندعم search أو q
-      sort: q.sort,            // الآن مدعوم في الـ DTO
+    const limit = q.limit ?? 20;
+
+    // NEW: ندعم offset أو skip؛ وإلا نحسبه من page
+    const offset =
+      typeof q.offset === 'number' ? q.offset :
+      typeof q.skip === 'number'   ? q.skip   :
+      Math.max(0, ((q.page ?? 1) - 1) * limit);
+
+    const { items, total } = await this.usersService.findAll({
+      page: q.page,
+      limit,
+      offset,
+      includeInactive: q.includeInactive === true,
+      search: q.search ?? q.q,
+      sort: q.sort,
     });
 
     return {
-      page,
       limit,
+      offset,
       total,
       items: items.map((u) => ({
         id: u.id,
@@ -89,20 +97,19 @@ export class UsersController {
 
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    return this.usersService.remove(id); // { success: true, recSts: 0 }
+    return this.usersService.remove(id);
   }
 
-  // ============ NEW: قائمة خفيفة لـ Assign Team ============
-  // GET /users/assign?search=&onlyActive=1&limit=20&offset=0
   @Get('assign')
   async listForAssign(
-    @Query('search') search = '',
+    @Query('search') search?: string,
+    @Query('q') qAlt?: string,
     @Query('onlyActive') onlyActive: string | number | boolean = '1',
     @Query('limit') limit: string | number = '20',
     @Query('offset') offset: string | number = '0',
   ) {
     const { items, total } = await this.usersService.listForAssign({
-      search,
+      search: (search ?? qAlt ?? '').toString(),
       onlyActive: !(
         onlyActive === '0' ||
         onlyActive === 0 ||
@@ -123,7 +130,7 @@ export class UsersController {
         firstName: u.firstName,
         lastName: u.lastName,
         recSts: u.recSts,
-        initials: u.initials, // لاستخدامها في الـAvatar زي الفرونت
+        initials: u.initials,
       })),
     };
   }

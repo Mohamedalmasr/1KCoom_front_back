@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
-import { Repository } from 'typeorm';
+import { ILike, Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserEntity } from './entities/user.entity';
@@ -24,9 +24,10 @@ export interface User {
 type FindAllOpts = {
   page?: number;
   limit?: number;
+  offset?: number;          // NEW
   includeInactive?: boolean;
   search?: string;
-  sort?: string; // e.g. "id:asc"
+  sort?: string;            // e.g. "id:asc"
 };
 
 @Injectable()
@@ -39,7 +40,7 @@ export class UsersService {
   // ============ CREATE ============
   async create(dto: CreateUserDto): Promise<User> {
     const email = this.normalizeEmail(dto.email);
-    const exists = await this.findByEmail(email);
+    const exists = await this.usersRepository.findOne({ where: { email } });
     if (exists) throw new ConflictException('Email already exists');
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -49,8 +50,7 @@ export class UsersService {
       passwordHash,
       firstName: dto.firstName ?? null,
       lastName: dto.lastName ?? null,
-      // recSts default 1 from entity
-      // no passwordCode/passwordCodeDate since email verification disabled
+      // recSts = 1 by default
     });
 
     const saved = await this.usersRepository.save(entity);
@@ -59,32 +59,43 @@ export class UsersService {
 
   // ============ LIST ============
   async findAll(opts: FindAllOpts = {}) {
-    const page = Math.max(1, opts.page ?? 1);
     const limit = Math.min(100, Math.max(1, opts.limit ?? 20));
+    const hasOffset = typeof opts.offset === 'number' && opts.offset >= 0;
+    const offset = hasOffset
+      ? (opts.offset as number)
+      : Math.max(0, ((opts.page ?? 1) - 1) * limit);
 
-    const qb = this.usersRepository.createQueryBuilder('u');
+    const includeInactive = !!opts.includeInactive;
+    const q = opts.search?.trim();
 
-    if (!opts.includeInactive) {
-      qb.andWhere('u.recSts = :recSts', { recSts: 1 });
-    }
+    // فلتر RecSts
+    const base = includeInactive ? {} : { recSts: 1 as any };
 
-    if (opts.search?.trim()) {
-      const s = `%${opts.search.trim().toLowerCase()}%`;
-      qb.andWhere(
-        '(LOWER(u.email) LIKE :s OR LOWER(u.firstName) LIKE :s OR LOWER(u.lastName) LIKE :s)',
-        { s },
-      );
-    }
+    // where باستخدام ILike مع Repository (OR conditions)
+    const where = q
+      ? [
+          { ...base, email: ILike(`%${q}%`) },
+          { ...base, firstName: ILike(`%${q}%`) },
+          { ...base, lastName: ILike(`%${q}%`) },
+        ]
+      : base;
 
-    const sort = this.normalizeSort(opts.sort);
-    qb.orderBy(sort.column, sort.direction).skip((page - 1) * limit).take(limit);
+    // sort
+    const order = this.buildOrder(opts.sort);
 
-    const [rows, total] = await qb.getManyAndCount();
+    const [rows, total] = await this.usersRepository.findAndCount({
+      where,
+      order,
+      skip: offset,
+      take: limit,
+    });
+
     return {
       items: rows.map((e) => this.mapEntityToUser(e)),
-      page,
+      page: Math.floor(offset / limit) + 1,
       limit,
       total,
+      offset,
     };
   }
 
@@ -107,12 +118,8 @@ export class UsersService {
     if (dto.email) {
       const newEmail = this.normalizeEmail(dto.email);
       if (newEmail !== entity.email) {
-        const dup = await this.usersRepository
-          .createQueryBuilder('x')
-          .where('LOWER(x.email) = :email', { email: newEmail })
-          .andWhere('x.id != :id', { id })
-          .getOne();
-        if (dup) throw new ConflictException('Email already exists');
+        const dup = await this.usersRepository.findOne({ where: { email: newEmail } });
+        if (dup && dup.id !== id) throw new ConflictException('Email already exists');
         entity.email = newEmail;
       }
     }
@@ -120,17 +127,9 @@ export class UsersService {
     if (dto.password) {
       entity.passwordHash = await bcrypt.hash(dto.password, 10);
     }
-
-    if (typeof dto.firstName === 'string') {
-      entity.firstName = dto.firstName || null;
-    }
-    if (typeof dto.lastName === 'string') {
-      entity.lastName = dto.lastName || null;
-    }
-
-    if (typeof dto.recSts === 'number') {
-      entity.recSts = dto.recSts;
-    }
+    if (typeof dto.firstName === 'string') entity.firstName = dto.firstName || null;
+    if (typeof dto.lastName === 'string') entity.lastName = dto.lastName || null;
+    if (typeof dto.recSts === 'number') entity.recSts = dto.recSts;
 
     const saved = await this.usersRepository.save(entity);
     return this.mapEntityToUser(saved);
@@ -150,10 +149,7 @@ export class UsersService {
   // ============ Helpers ============
   async findByEmail(email: string): Promise<User | undefined> {
     const normalizedEmail = this.normalizeEmail(email);
-    const entity = await this.usersRepository
-      .createQueryBuilder('user')
-      .where('LOWER(user.email) = :email', { email: normalizedEmail })
-      .getOne();
+    const entity = await this.usersRepository.findOne({ where: { email: normalizedEmail } });
     return entity ? this.mapEntityToUser(entity) : undefined;
   }
 
@@ -178,29 +174,22 @@ export class UsersService {
     };
   }
 
-  private normalizeSort(sort?: string): { column: string; direction: 'ASC' | 'DESC' } {
-    const allowed: Record<string, string> = {
-      id: 'u.id',
-      email: 'u.email',
-      firstName: 'u.firstName',
-      lastName: 'u.lastName',
-      recSts: 'u.recSts',
+  private buildOrder(sort?: string): Record<string, 'ASC' | 'DESC'> {
+    const allowed: Record<string, keyof UserEntity> = {
+      id: 'id',
+      email: 'email',
+      firstName: 'firstName',
+      lastName: 'lastName',
+      recSts: 'recSts',
     };
-    if (!sort || typeof sort !== 'string') {
-      return { column: 'u.id', direction: 'DESC' };
-    }
+    if (!sort) return { id: 'DESC' };
     const [rawCol, rawDir] = sort.split(':').map((s) => s.trim());
-    const col = allowed[rawCol] ?? 'u.id';
+    const key = allowed[rawCol] ?? 'id';
     const dir = (rawDir || 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-    return { column: col, direction: dir };
+    return { [key]: dir };
   }
 
-  // ============ NEW: Assign Team friendly list ============
-  /**
-   * قائمة خفيفة لاختيار أعضاء الفريق في الويزارد.
-   * Params: search, onlyActive (true), limit (20), offset (0)
-   * Return: { items: [{id,email,firstName,lastName,initials}], total }
-   */
+  // ============ Assign list (Repository + ILike) ============
   async listForAssign(paramsIn?: {
     search?: string;
     onlyActive?: boolean;
@@ -212,24 +201,21 @@ export class UsersService {
     const limit = Math.min(100, Math.max(1, Number(paramsIn?.limit ?? 20)));
     const offset = Math.max(0, Number(paramsIn?.offset ?? 0));
 
-    const qb = this.usersRepository.createQueryBuilder('u')
-      .select(['u.id', 'u.email', 'u.firstName', 'u.lastName', 'u.passwordHash', 'u.recSts']);
+    const base = onlyActive ? { recSts: 1 as any } : {};
+    const where = search
+      ? [
+          { ...base, email: ILike(`%${search}%`) },
+          { ...base, firstName: ILike(`%${search}%`) },
+          { ...base, lastName: ILike(`%${search}%`) },
+        ]
+      : base;
 
-    if (onlyActive) {
-      qb.andWhere('u.recSts = :recSts', { recSts: 1 });
-    }
-
-    if (search) {
-      const s = `%${search.toLowerCase()}%`;
-      qb.andWhere(
-        '(LOWER(u.email) LIKE :s OR LOWER(u.firstName) LIKE :s OR LOWER(u.lastName) LIKE :s)',
-        { s },
-      );
-    }
-
-    qb.orderBy('u.id', 'DESC').skip(offset).take(limit);
-
-    const [rows, total] = await qb.getManyAndCount();
+    const [rows, total] = await this.usersRepository.findAndCount({
+      where,
+      order: { id: 'DESC' },
+      skip: offset,
+      take: limit,
+    });
 
     const items = rows.map((e) => {
       const u = this.mapEntityToUser(e);
@@ -239,7 +225,6 @@ export class UsersService {
     return { items, total };
   }
 
-  // helper لعمل الـ initials (AJ, MG, ...)
   private getInitials(first?: string, last?: string): string {
     const a = (first || '').trim();
     const b = (last || '').trim();

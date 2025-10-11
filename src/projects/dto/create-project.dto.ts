@@ -1,42 +1,56 @@
-import {
-  ArrayNotEmpty,
-  IsArray,
-  IsDateString,
-  IsEnum,
-  IsInt,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
-  IsString,
-  MaxLength,
-  MinLength,
-  ValidateNested,
-} from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  ArrayNotEmpty, IsArray, IsDateString, IsEnum, IsInt, IsNumber,
+  IsOptional, IsString, Length, MaxLength, Min, ValidateNested
+} from 'class-validator';
 
-export class CreateTaskDto {
-  @IsString() @MinLength(1) @MaxLength(255) title!: string;
-  @IsOptional() @IsString() @MaxLength(500) subject?: string;
-  @IsOptional() @IsNumber() estimatedHours?: number;
-  @IsOptional() @IsEnum(['Low','Medium','High'] as any) priority?: 'Low'|'Medium'|'High';
+export class CreateTaskInputDto {
+  @IsString() @MaxLength(255)
+  title!: string;
+
+  @IsString() @MaxLength(500)
+  subject!: string;
+
+  @IsNumber() @Min(0)
+  estimatedHours!: number;
+
+  @IsEnum({ High: 'High', Medium: 'Medium', Low: 'Low' } as const)
+  priority!: 'High' | 'Medium' | 'Low';
 }
 
 export class CreateProjectDto {
-  @IsNotEmpty()
-  name: string;
+  @IsString() @Length(1, 16)
+  projectCode!: string;
 
-  @IsOptional() @IsString() @MaxLength(16)  projectCode?: string;
-  @IsOptional() @IsString() @MaxLength(5000) projectDesc?: string;
+  @IsString() @MaxLength(255)
+  name!: string;
 
-  @IsOptional() @IsInt()    leaderAID?: number;
-  @IsOptional() @IsString() @MaxLength(100) type?: string;
-  @IsOptional() @IsDateString() startDate?: string;
-  @IsOptional() @IsDateString() dueDate?: string;
-  @IsOptional() @IsNumber() budget?: number;
-  @IsOptional() @IsEnum(['On Track','Offtrack','Completed'] as any)
-  status?: 'On Track'|'Offtrack'|'Completed';
+  @IsOptional() @IsString() @MaxLength(5000)
+  projectDesc?: string;
 
-  @IsArray() @ArrayNotEmpty() @IsInt({ each: true }) members!: number[];
-  @IsArray() @ValidateNested({ each: true }) @Type(() => CreateTaskDto) tasks!: CreateTaskDto[];
-  @IsOptional() @IsString() @MaxLength(255) projectName?: string;
+  @IsOptional() @IsInt()
+  leaderAID?: number;
+
+  @IsString() @MaxLength(50)
+  type!: string;
+
+  @IsOptional() @IsDateString()
+  startDate?: string;
+
+  @IsOptional() @IsDateString()
+  dueDate?: string;
+
+  @IsNumber()
+  budget!: number;
+
+  @IsString() @MaxLength(20)
+  status!: string;
+
+  @IsArray() @ArrayNotEmpty() @IsInt({ each: true })
+  members!: number[];
+
+  @IsArray() @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => CreateTaskInputDto)
+  tasks!: CreateTaskInputDto[];
 }
