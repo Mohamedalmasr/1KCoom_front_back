@@ -29,6 +29,7 @@ export class UsersController {
       lastName: u.lastName,
       passwordCode: u.passwordCode,
       passwordCodeDate: u.passwordCodeDate?.toISOString(),
+      role: u.role,
     };
   }
 
@@ -62,6 +63,7 @@ export class UsersController {
         firstName: u.firstName,
         lastName: u.lastName,
         passwordCodeDate: u.passwordCodeDate?.toISOString(),
+        role: u.role,
       })),
     };
   }
@@ -76,6 +78,7 @@ export class UsersController {
       firstName: u.firstName,
       lastName: u.lastName,
       passwordCodeDate: u.passwordCodeDate?.toISOString(),
+      role: u.role,
     };
   }
 
@@ -92,6 +95,7 @@ export class UsersController {
       firstName: u.firstName,
       lastName: u.lastName,
       passwordCodeDate: u.passwordCodeDate?.toISOString(),
+      role: u.role,
     };
   }
 
@@ -131,6 +135,7 @@ export class UsersController {
         lastName: u.lastName,
         recSts: u.recSts,
         initials: u.initials,
+        role: u.role,
       })),
     };
   }

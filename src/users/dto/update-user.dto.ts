@@ -23,4 +23,9 @@ export class UpdateUserDto {
   @IsInt()
   @IsIn([0, 1] as const)
   recSts?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['admin', 'member'])
+  role?: string;
 }

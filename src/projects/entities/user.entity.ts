@@ -16,4 +16,7 @@ export class User {
 
   @Column({ name: 'RecSts', type: 'char', length: 1, default: () => `'1'` })
   recSts!: string;
+
+  @Column({ name: 'role', type: 'varchar', length: 20, default: 'member' })
+  role!: string;
 }

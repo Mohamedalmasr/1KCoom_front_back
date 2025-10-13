@@ -25,4 +25,8 @@ export class UserEntity {
 
   @Column({ name: 'PasswordCodeDate', type: 'timestamp', nullable: true })
   passwordCodeDate?: Date | null;
+
+  // 👇 لاحظ الاسم الصغير هنا لو جدولك فعلاً فيه role small-caseش
+  @Column({ name: 'role', type: 'varchar', length: 20, default: 'member' })
+  role!: string;
 }

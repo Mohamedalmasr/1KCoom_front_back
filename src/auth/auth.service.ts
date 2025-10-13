@@ -20,7 +20,7 @@ export class AuthService {
     const isValidPassword = await this.usersService.validatePassword(user, credentials.password);
     if (!isValidPassword) throw new UnauthorizedException('Invalid email or password');
 
-    const payload = { sub: user.id, email: user.email };
+    const payload = { sub: user.id, email: user.email, role: user.role };
     const accessToken = await this.jwtService.signAsync(payload);
 
     return {
@@ -33,6 +33,7 @@ export class AuthService {
         lastName: user.lastName,
         passwordCode: user.passwordCode,
         passwordCodeDate: user.passwordCodeDate?.toISOString(),
+        role: user.role,
       },
     };
   }
@@ -47,11 +48,11 @@ export class AuthService {
       lastName: me.lastName,
       passwordCode: me.passwordCode,
       passwordCodeDate: me.passwordCodeDate?.toISOString(),
+      role: me.role,
     };
   }
 
   async updateMe(userId: number, dto: UpdateMeDto) {
-    // منع تكرار الإيميل
     if (dto.email) {
       const existing = await this.usersService.findByEmail(dto.email);
       if (existing && existing.id !== userId) {
@@ -65,6 +66,7 @@ export class AuthService {
       recSts: updated.recSts,
       firstName: updated.firstName,
       lastName: updated.lastName,
+      role: updated.role,
     };
   }
 

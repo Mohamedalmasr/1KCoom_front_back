@@ -19,6 +19,7 @@ export interface User {
   lastName?: string;
   passwordCode?: string;
   passwordCodeDate?: Date;
+  role: string;
 }
 
 type FindAllOpts = {
@@ -50,6 +51,7 @@ export class UsersService {
       passwordHash,
       firstName: dto.firstName ?? null,
       lastName: dto.lastName ?? null,
+      role: dto.role ?? 'member',
       // recSts = 1 by default
     });
 
@@ -130,6 +132,7 @@ export class UsersService {
     if (typeof dto.firstName === 'string') entity.firstName = dto.firstName || null;
     if (typeof dto.lastName === 'string') entity.lastName = dto.lastName || null;
     if (typeof dto.recSts === 'number') entity.recSts = dto.recSts;
+    if (dto.role) entity.role = dto.role;
 
     const saved = await this.usersRepository.save(entity);
     return this.mapEntityToUser(saved);
@@ -171,6 +174,7 @@ export class UsersService {
       lastName: entity.lastName ?? undefined,
       passwordCode: entity.passwordCode ?? undefined,
       passwordCodeDate: entity.passwordCodeDate ?? undefined,
+      role: entity.role ?? 'member',
     };
   }
 
