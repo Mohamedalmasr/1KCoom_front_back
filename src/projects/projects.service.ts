@@ -18,11 +18,27 @@ import { User } from './entities/user.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { ListProjectTasksDto } from './dto/list-project-tasks.dto';
+import type { TaskPriorityValue } from './dto/list-project-tasks.dto';
+import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
+import type { TaskStatusValue } from './dto/update-task-status.dto';
 
 const PriorityMap: Record<'High' | 'Medium' | 'Low', number> = {
   High: 3,
   Medium: 2,
   Low: 1,
+};
+
+const PrioritySlugToCode: Record<TaskPriorityValue, number> = {
+  high: PriorityMap.High,
+  medium: PriorityMap.Medium,
+  low: PriorityMap.Low,
+};
+
+const TaskStatusSlugToCode: Record<TaskStatusValue, number> = {
+  todo: 0,
+  in_progress: 1,
+  done: 2,
 };
 
 @Injectable()
@@ -312,6 +328,13 @@ export class ProjectsService {
     return { ok: true, taskAID };
   }
 
+  async updateTaskStatus(projectAID: number, taskAID: number, dto: UpdateTaskStatusDto) {
+    const task = await this.assertTaskUnderProject(projectAID, taskAID);
+    task.taskSts = TaskStatusSlugToCode[dto.status];
+    await this.taskRepo.save(task);
+    return;
+  }
+
   async deleteTask(projectAID: number, taskAID: number) {
     const task = await this.taskRepo.findOne({ where: { taskAID, projectFK: projectAID } });
     if (!task) throw new NotFoundException('Task not found');
@@ -325,6 +348,33 @@ export class ProjectsService {
 
     await this.taskRepo.delete({ taskAID });
     return;
+  }
+
+  async listProjectTasks(projectAID: number, dto: ListProjectTasksDto) {
+    await this.assertProjectExists(projectAID);
+    const filters = dto ?? {};
+
+    const limit = Math.min(200, Math.max(1, filters.limit ?? 50));
+    const offset = Math.max(0, filters.offset ?? 0);
+
+    const qb = this.taskRepo.createQueryBuilder('task').where('task.projectFK = :projectAID', { projectAID });
+
+    if (filters.status) {
+      qb.andWhere('task.taskSts = :status', { status: TaskStatusSlugToCode[filters.status] });
+    }
+
+    if (filters.priority) {
+      qb.andWhere('task.taskPriority = :priority', { priority: PrioritySlugToCode[filters.priority] });
+    }
+
+    const search = filters.search?.trim();
+    if (search) {
+      qb.andWhere('(task.name ILIKE :search OR task.taskDesc ILIKE :search)', { search: `%${search}%` });
+    }
+
+    const [items, total] = await qb.orderBy('task.taskAID', 'DESC').skip(offset).take(limit).getManyAndCount();
+
+    return { projectAID, limit, offset, total, items };
   }
 
   /* ================= Assignees ================= */
@@ -519,6 +569,11 @@ export class ProjectsService {
   /* ================= helpers ================= */
   private taskCode(projectCode: string, n: number) {
     return `${projectCode}-${String(n).padStart(3, '0')}`.slice(0, 16);
+  }
+
+  private async assertProjectExists(projectAID: number) {
+    const exists = await this.projectRepo.exist({ where: { projectAID } });
+    if (!exists) throw new NotFoundException('Project not found');
   }
 
   private async ensureUsersExist(ids: number[], qr?: ReturnType<DataSource['createQueryRunner']>) {

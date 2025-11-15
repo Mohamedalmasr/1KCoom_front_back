@@ -1,4 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column, Index } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { Project } from './project.entity';
+import { Session as TaskSession } from '../../sessions/entities/session.entity';
 
 @Entity({ name: 'tP_Task' })
 export class Task {
@@ -17,6 +19,10 @@ export class Task {
   @Index('IX_Task_ProjectFK')
   @Column({ name: 'ProjectFK', type: 'int4' })
   projectFK!: number;
+
+  @ManyToOne(() => Project, (project) => project.tasks, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'ProjectFK', referencedColumnName: 'projectAID' })
+  project?: Project;
 
   @Column({ name: 'DateStrt', type: 'date', nullable: true })
   dateStrt?: string | null;
@@ -42,4 +48,7 @@ export class Task {
 
   @Column({ name: 'RecSts', type: 'char', length: 1, default: () => `'1'` })
   recSts!: string;
+
+  @OneToMany(() => TaskSession, (session) => session.task, { cascade: false })
+  sessions?: TaskSession[];
 }

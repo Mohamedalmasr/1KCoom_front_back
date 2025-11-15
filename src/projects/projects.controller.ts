@@ -15,6 +15,8 @@ import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
+import { ListProjectTasksDto } from './dto/list-project-tasks.dto';
+import { UpdateTaskStatusDto } from './dto/update-task-status.dto';
 import { AddAssigneesDto } from './dto/add-assignees.dto';
 import { ClaimTaskDto } from './dto/claim-task.dto';
 
@@ -45,6 +47,11 @@ export class ProjectsController {
       take: take ? Number(take) : undefined,
       skip: skip ? Number(skip) : undefined,
     });
+  }
+
+  @Get(':id/tasks')
+  listTasks(@Param('id', ParseIntPipe) projectId: number, @Query() query: ListProjectTasksDto) {
+    return this.svc.listProjectTasks(projectId, query);
   }
 
   @Get(':id')
@@ -83,6 +90,16 @@ export class ProjectsController {
     @Body() dto: UpdateTaskDto,
   ) {
     return this.svc.updateTask(projectId, taskId, dto);
+  }
+
+  @Patch(':id/tasks/:taskId/status')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  updateTaskStatus(
+    @Param('id', ParseIntPipe) projectId: number,
+    @Param('taskId', ParseIntPipe) taskId: number,
+    @Body() dto: UpdateTaskStatusDto,
+  ) {
+    return this.svc.updateTaskStatus(projectId, taskId, dto);
   }
 
   @Delete(':id/tasks/:taskId')
